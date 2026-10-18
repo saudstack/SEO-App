@@ -4,25 +4,44 @@
  */
 
 import React, { useState } from 'react';
-import { Copy, Check, Type, AlignLeft } from 'lucide-react';
+import { Copy, Check, Type, AlignLeft, Sparkles } from 'lucide-react';
 
 interface SuggestionsCardProps {
   titleSuggestions: string[];
   metaSuggestions: string[];
+  currentTitle?: string;
+  currentMeta?: string;
+  selectedTitleIndex?: number;
+  selectedMetaIndex?: number;
+  onSelectTitle?: (index: number) => void;
+  onSelectMeta?: (index: number) => void;
 }
 
 export const SuggestionsCard: React.FC<SuggestionsCardProps> = ({
   titleSuggestions,
   metaSuggestions,
+  currentTitle,
+  currentMeta,
+  selectedTitleIndex = 0,
+  selectedMetaIndex = 0,
+  onSelectTitle,
+  onSelectMeta,
 }) => {
-  const [copiedIndex, setCopiedIndex] = useState<string | null>(null);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
 
   const handleCopy = (text: string, id: string) => {
     navigator.clipboard.writeText(text);
-    setCopiedIndex(id);
+    setCopiedId(id);
     setTimeout(() => {
-      setCopiedIndex(null);
+      setCopiedId(null);
     }, 2000);
+  };
+
+  const handleCopyAll = (items: string[], type: 'titles' | 'metas') => {
+    const text = items.map((item, idx) => `Option ${idx + 1}: ${item}`).join('\n\n');
+    navigator.clipboard.writeText(text);
+    setCopiedId(`all-${type}`);
+    setTimeout(() => setCopiedId(null), 2000);
   };
 
   return (
@@ -40,24 +59,66 @@ export const SuggestionsCard: React.FC<SuggestionsCardProps> = ({
                   SEO Title Tag Suggestions
                 </h3>
                 <p className="text-xs text-slate-500">
-                  Strictly optimized under 60 characters for SERP display
+                  Click-worthy titles strictly optimized under 60 characters
                 </p>
               </div>
             </div>
-            <span className="text-xs text-slate-500 font-mono">Max 60 Chars</span>
+
+            <button
+              type="button"
+              onClick={() => handleCopyAll(titleSuggestions, 'titles')}
+              className={`px-2.5 py-1 text-xs font-medium border rounded-md transition-colors flex items-center gap-1 ${
+                copiedId === 'all-titles'
+                  ? 'bg-emerald-50 text-emerald-700 border-emerald-300'
+                  : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+              }`}
+              title="Copy all 3 title options"
+            >
+              {copiedId === 'all-titles' ? (
+                <>
+                  <Check className="w-3 h-3 text-emerald-600" />
+                  <span>Copied All</span>
+                </>
+              ) : (
+                <>
+                  <Copy className="w-3 h-3" />
+                  <span>Copy All</span>
+                </>
+              )}
+            </button>
           </div>
+
+          {currentTitle && (
+            <div className="mb-3.5 p-3 rounded-lg bg-slate-50 border border-slate-200 text-xs text-slate-600">
+              <div className="flex items-center justify-between mb-1">
+                <span className="font-semibold text-slate-700 uppercase tracking-wider text-[10px]">
+                  Current Title Tag
+                </span>
+                <span className="font-mono text-[11px] text-slate-500">
+                  {currentTitle.length} / 60 chars
+                </span>
+              </div>
+              <p className="font-medium text-slate-800 truncate">{currentTitle}</p>
+            </div>
+          )}
 
           <div className="space-y-3">
             {titleSuggestions.map((title, index) => {
               const charCount = title.length;
               const isOver = charCount > 60;
               const copyId = `title-${index}`;
-              const isCopied = copiedIndex === copyId;
+              const isCopied = copiedId === copyId;
+              const isSelected = selectedTitleIndex === index;
 
               return (
                 <div
                   key={index}
-                  className="group relative p-3.5 rounded-lg border border-slate-200/90 bg-slate-50/60 hover:bg-white hover:border-indigo-300 transition-all duration-150"
+                  onClick={() => onSelectTitle?.(index)}
+                  className={`group relative p-3.5 rounded-lg border transition-all duration-150 cursor-pointer ${
+                    isSelected
+                      ? 'border-indigo-500 bg-indigo-50/30 ring-1 ring-indigo-500/20'
+                      : 'border-slate-200/90 bg-slate-50/60 hover:bg-white hover:border-indigo-300'
+                  }`}
                 >
                   <div className="flex items-start justify-between gap-3">
                     <p className="text-sm font-semibold text-slate-900 leading-snug">
@@ -65,7 +126,10 @@ export const SuggestionsCard: React.FC<SuggestionsCardProps> = ({
                     </p>
                     <button
                       type="button"
-                      onClick={() => handleCopy(title, copyId)}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleCopy(title, copyId);
+                      }}
                       className={`shrink-0 p-1.5 rounded-md text-xs font-medium border transition-colors flex items-center gap-1 ${
                         isCopied
                           ? 'bg-emerald-50 text-emerald-700 border-emerald-300'
@@ -88,8 +152,13 @@ export const SuggestionsCard: React.FC<SuggestionsCardProps> = ({
                   </div>
 
                   <div className="mt-2.5 flex items-center justify-between text-xs text-slate-500">
-                    <span className="text-[11px] font-medium text-slate-400">
-                      Option {index + 1}
+                    <span className="text-[11px] font-medium text-slate-400 flex items-center gap-1.5">
+                      <span>Option {index + 1}</span>
+                      {isSelected && (
+                        <span className="text-indigo-600 font-semibold flex items-center gap-0.5">
+                          <Sparkles className="w-3 h-3" /> Active in Preview
+                        </span>
+                      )}
                     </span>
                     <span
                       className={`font-mono text-xs tabular-nums font-medium ${
@@ -123,24 +192,66 @@ export const SuggestionsCard: React.FC<SuggestionsCardProps> = ({
                   Meta Description Suggestions
                 </h3>
                 <p className="text-xs text-slate-500">
-                  Optimized under 155 characters with persuasive click triggers
+                  Persuasive descriptions strictly under 155 characters with CTA
                 </p>
               </div>
             </div>
-            <span className="text-xs text-slate-500 font-mono">Max 155 Chars</span>
+
+            <button
+              type="button"
+              onClick={() => handleCopyAll(metaSuggestions, 'metas')}
+              className={`px-2.5 py-1 text-xs font-medium border rounded-md transition-colors flex items-center gap-1 ${
+                copiedId === 'all-metas'
+                  ? 'bg-emerald-50 text-emerald-700 border-emerald-300'
+                  : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+              }`}
+              title="Copy all 3 meta options"
+            >
+              {copiedId === 'all-metas' ? (
+                <>
+                  <Check className="w-3 h-3 text-emerald-600" />
+                  <span>Copied All</span>
+                </>
+              ) : (
+                <>
+                  <Copy className="w-3 h-3" />
+                  <span>Copy All</span>
+                </>
+              )}
+            </button>
           </div>
+
+          {currentMeta && (
+            <div className="mb-3.5 p-3 rounded-lg bg-slate-50 border border-slate-200 text-xs text-slate-600">
+              <div className="flex items-center justify-between mb-1">
+                <span className="font-semibold text-slate-700 uppercase tracking-wider text-[10px]">
+                  Current Meta Description
+                </span>
+                <span className="font-mono text-[11px] text-slate-500">
+                  {currentMeta.length} / 155 chars
+                </span>
+              </div>
+              <p className="font-medium text-slate-800 line-clamp-2">{currentMeta}</p>
+            </div>
+          )}
 
           <div className="space-y-3">
             {metaSuggestions.map((meta, index) => {
               const charCount = meta.length;
               const isOver = charCount > 155;
               const copyId = `meta-${index}`;
-              const isCopied = copiedIndex === copyId;
+              const isCopied = copiedId === copyId;
+              const isSelected = selectedMetaIndex === index;
 
               return (
                 <div
                   key={index}
-                  className="group relative p-3.5 rounded-lg border border-slate-200/90 bg-slate-50/60 hover:bg-white hover:border-indigo-300 transition-all duration-150"
+                  onClick={() => onSelectMeta?.(index)}
+                  className={`group relative p-3.5 rounded-lg border transition-all duration-150 cursor-pointer ${
+                    isSelected
+                      ? 'border-indigo-500 bg-indigo-50/30 ring-1 ring-indigo-500/20'
+                      : 'border-slate-200/90 bg-slate-50/60 hover:bg-white hover:border-indigo-300'
+                  }`}
                 >
                   <div className="flex items-start justify-between gap-3">
                     <p className="text-sm text-slate-700 leading-relaxed">
@@ -148,7 +259,10 @@ export const SuggestionsCard: React.FC<SuggestionsCardProps> = ({
                     </p>
                     <button
                       type="button"
-                      onClick={() => handleCopy(meta, copyId)}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleCopy(meta, copyId);
+                      }}
                       className={`shrink-0 p-1.5 rounded-md text-xs font-medium border transition-colors flex items-center gap-1 ${
                         isCopied
                           ? 'bg-emerald-50 text-emerald-700 border-emerald-300'
@@ -171,8 +285,13 @@ export const SuggestionsCard: React.FC<SuggestionsCardProps> = ({
                   </div>
 
                   <div className="mt-2.5 flex items-center justify-between text-xs text-slate-500">
-                    <span className="text-[11px] font-medium text-slate-400">
-                      Option {index + 1}
+                    <span className="text-[11px] font-medium text-slate-400 flex items-center gap-1.5">
+                      <span>Option {index + 1}</span>
+                      {isSelected && (
+                        <span className="text-indigo-600 font-semibold flex items-center gap-0.5">
+                          <Sparkles className="w-3 h-3" /> Active in Preview
+                        </span>
+                      )}
                     </span>
                     <span
                       className={`font-mono text-xs tabular-nums font-medium ${

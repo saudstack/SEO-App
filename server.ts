@@ -9,6 +9,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 import { GoogleGenAI, Type } from '@google/genai';
+import { AuditRequestPayload } from './src/types/seo';
 
 dotenv.config();
 
@@ -16,24 +17,33 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
-app.use(express.json({ limit: '10mb' }));
+// Lowered JSON limit from 10mb to 1mb for safety against payload bloating
+app.use(express.json({ limit: '1mb' }));
 
 const port = Number(process.env.PORT) || 3000;
 
-// Initialize Google GenAI client with required header
-const getAIClient = () => {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) {
-    throw new Error('GEMINI_API_KEY environment variable is not configured.');
-  }
-  return new GoogleGenAI({
-    apiKey,
-    httpOptions: {
-      headers: {
-        'User-Agent': 'aistudio-build',
+// Maximum allowed input lengths
+const MAX_CONTENT_CHARS = 50000;
+const MAX_KEYWORD_CHARS = 200;
+
+// Module-level lazy singleton for GoogleGenAI client
+let aiClientInstance: GoogleGenAI | null = null;
+const getAIClient = (): GoogleGenAI => {
+  if (!aiClientInstance) {
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      throw new Error('GEMINI_API_KEY environment variable is not configured.');
+    }
+    aiClientInstance = new GoogleGenAI({
+      apiKey,
+      httpOptions: {
+        headers: {
+          'User-Agent': 'aistudio-build',
+        },
       },
-    },
-  });
+    });
+  }
+  return aiClientInstance;
 };
 
 // SEO Audit Schema Definition
@@ -48,6 +58,17 @@ const auditResponseSchema = {
       type: Type.STRING,
       description: 'A crisp, one-line verdict evaluating the page status.',
     },
+    score_breakdown: {
+      type: Type.OBJECT,
+      properties: {
+        content_depth: { type: Type.INTEGER, description: 'Score 0-100 for topical completeness and length' },
+        readability: { type: Type.INTEGER, description: 'Score 0-100 for sentence cadence, simplicity, and tone' },
+        keyword_optimization: { type: Type.INTEGER, description: 'Score 0-100 for keyword density and natural placement' },
+        heading_structure: { type: Type.INTEGER, description: 'Score 0-100 for H1 clarity and logical heading order' },
+      },
+      required: ['content_depth', 'readability', 'keyword_optimization', 'heading_structure'],
+      description: 'Four calibrated category sub-scores from 0 to 100.',
+    },
     title_suggestions: {
       type: Type.ARRAY,
       items: { type: Type.STRING },
@@ -57,6 +78,34 @@ const auditResponseSchema = {
       type: Type.ARRAY,
       items: { type: Type.STRING },
       description: 'Exactly 3 persuasive meta description options under 155 characters each with a clear call-to-action.',
+    },
+    url_slug_suggestion: {
+      type: Type.STRING,
+      description: 'A clean, keyword-optimized URL slug under 50 characters (e.g., /dentist-in-doha).',
+    },
+    heading_recommendations: {
+      type: Type.OBJECT,
+      properties: {
+        h1_suggestion: {
+          type: Type.STRING,
+          description: 'An optimized primary H1 heading containing the target keyword with high click appeal',
+        },
+        recommended_outline: {
+          type: Type.ARRAY,
+          items: {
+            type: Type.OBJECT,
+            properties: {
+              level: { type: Type.STRING, description: "'H2' or 'H3'" },
+              heading: { type: Type.STRING, description: 'Proposed heading text' },
+              purpose: { type: Type.STRING, description: 'Why this heading satisfies user intent and topical authority' },
+            },
+            required: ['level', 'heading', 'purpose'],
+          },
+          description: 'A 4-6 section recommended heading outline that logically organizes and structures the content.',
+        },
+      },
+      required: ['h1_suggestion', 'recommended_outline'],
+      description: 'Optimized H1 and structured outline recommendations.',
     },
     keyword_gaps: {
       type: Type.ARRAY,
@@ -101,8 +150,11 @@ const auditResponseSchema = {
   required: [
     'overall_score',
     'verdict',
+    'score_breakdown',
     'title_suggestions',
     'meta_description_suggestions',
+    'url_slug_suggestion',
+    'heading_recommendations',
     'keyword_gaps',
     'readability_notes',
     'fix_list',
@@ -110,11 +162,55 @@ const auditResponseSchema = {
 };
 
 /**
+ * Determines whether an error qualifies for retry:
+ * Only retries on 429 (rate limits), 5xx server/overload errors, or malformed JSON.
+ * Specifically rejects retrying 400-class client errors.
+ */
+const isRetryableError = (err: any): boolean => {
+  if (err instanceof SyntaxError) return true;
+  const status = Number(err?.status || err?.statusCode || err?.response?.status);
+
+  // 400-class errors (except 429) are invalid requests and should never be retried
+  if (status >= 400 && status < 500 && status !== 429) {
+    return false;
+  }
+
+  // Rate limit
+  if (status === 429) return true;
+  // Upstream server errors
+  if (status >= 500 && status < 600) return true;
+
+  const msg = String(err?.message || '').toLowerCase();
+  if (
+    msg.includes('rate limit') ||
+    msg.includes('quota') ||
+    msg.includes('resource_exhausted') ||
+    msg.includes('overloaded')
+  ) {
+    return true;
+  }
+
+  if (
+    msg.includes('json') ||
+    msg.includes('unexpected token') ||
+    msg.includes('syntaxerror')
+  ) {
+    return true;
+  }
+
+  return false;
+};
+
+const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+/**
  * Route: POST /api/audit
- * Performs structured SEO audit with Gemini 3.8 Flash, with automatic single retry on invalid JSON
+ * Performs structured SEO audit with Gemini 3.8 Flash with input sanitization,
+ * exponential backoff retry on transient errors, and sanitized error responses.
  */
 app.post('/api/audit', async (req: Request, res: Response): Promise<void> => {
   try {
+    const body = req.body as Partial<AuditRequestPayload>;
     const {
       pageContent,
       title = '',
@@ -123,46 +219,85 @@ app.post('/api/audit', async (req: Request, res: Response): Promise<void> => {
       secondaryKeywords = [],
       pageUrl = '',
       metrics,
-    } = req.body;
+    } = body;
 
+    // Validate pageContent
     if (!pageContent || typeof pageContent !== 'string' || !pageContent.trim()) {
       res.status(400).json({ error: 'Page content is required for the audit.' });
       return;
     }
 
+    if (pageContent.length > MAX_CONTENT_CHARS) {
+      res.status(413).json({
+        error: `Page content exceeds the maximum limit of ${MAX_CONTENT_CHARS.toLocaleString()} characters (provided ${pageContent.length.toLocaleString()} characters). Please shorten or truncate the text.`,
+      });
+      return;
+    }
+
+    // Validate targetKeyword
     if (!targetKeyword || typeof targetKeyword !== 'string' || !targetKeyword.trim()) {
       res.status(400).json({ error: 'A primary target keyword is required.' });
       return;
     }
 
+    if (targetKeyword.length > MAX_KEYWORD_CHARS) {
+      res.status(400).json({
+        error: `Target keyword exceeds the maximum limit of ${MAX_KEYWORD_CHARS} characters.`,
+      });
+      return;
+    }
+
+    // Sanitize secondaryKeywords to guaranteed string array
+    const sanitizedSecondaryKeywords: string[] = Array.isArray(secondaryKeywords)
+      ? secondaryKeywords
+          .filter((k): k is string => typeof k === 'string')
+          .map(k => k.trim())
+          .filter(Boolean)
+          .slice(0, 10)
+      : [];
+
+    // Sanitize metrics to plain object or default to empty
+    const sanitizedMetrics =
+      metrics && typeof metrics === 'object' && !Array.isArray(metrics) ? metrics : null;
+
+    const sanitizedTitle = typeof title === 'string' ? title.slice(0, 300) : '';
+    const sanitizedMeta =
+      typeof metaDescription === 'string' ? metaDescription.slice(0, 500) : '';
+    const sanitizedUrl = typeof pageUrl === 'string' ? pageUrl.slice(0, 2048) : '';
+
     const ai = getAIClient();
 
-    const systemInstruction = `You are a senior technical SEO consultant and content strategist.
-Your task is to analyze a web page's text and pre-calculated heuristics against its target keyword and search intent.
-Provide a rigorous, unbiased, professional audit in strict JSON adhering to the provided schema.
-Ensure title suggestions are STRICTLY under 60 characters.
-Ensure meta description suggestions are STRICTLY under 155 characters.
-Provide exactly 3 specific sentences from the text with simplified rewrites.
-Prioritize fixes logically into High, Medium, and Low.`;
+    const systemInstruction = `You are a senior technical SEO director and search strategist.
+Your task is to analyze the provided web page copy and browser-calculated heuristics against its target keyword and user search intent.
+Follow modern Google Search Essentials, helpful content criteria, and on-page optimization best practices:
+1. Ensure all title suggestions are compelling, click-worthy, contain the target keyword, and are STRICTLY under 60 characters.
+2. Ensure meta descriptions include a clear value proposition, call-to-action, and are STRICTLY under 155 characters.
+3. Suggest an SEO-friendly URL slug (e.g. /dentist-in-doha) under 50 characters.
+4. Recommend an optimized H1 and a logical H2/H3 outline that comprehensively covers search intent.
+5. Provide a realistic score_breakdown (0-100) across content depth, readability, keyword optimization, and heading structure.
+6. Identify real semantic keyword gaps and user search questions not answered on the page.
+7. Provide exactly 3 specific dense or wordy sentences from the text with simplified, punchy rewrites.
+8. Prioritize actionable fixes into High, Medium, and Low with one-line rationale.
+Output must be strictly valid JSON conforming exactly to the response schema.`;
 
     const promptText = `Please audit this web page content:
-Target Keyword: "${targetKeyword}"
-Secondary Keywords: ${secondaryKeywords.length ? secondaryKeywords.join(', ') : 'None'}
-Page URL: ${pageUrl || 'None specified'}
-Existing Page Title: "${title || '(None provided)'}"
-Existing Meta Description: "${metaDescription || '(None provided)'}"
+Target Keyword: "${targetKeyword.trim()}"
+Secondary Keywords: ${sanitizedSecondaryKeywords.length ? sanitizedSecondaryKeywords.join(', ') : 'None'}
+Page URL: ${sanitizedUrl || 'None specified'}
+Existing Page Title: "${sanitizedTitle || '(None provided)'}"
+Existing Meta Description: "${sanitizedMeta || '(None provided)'}"
 
 Pre-calculated Browser On-Page Metrics:
-- Word Count: ${metrics?.wordCount ?? 'Unknown'} ${metrics?.thinContentWarning ? '(WARNING: Content is thin under 100 words)' : ''}
-- Sentences: ${metrics?.sentenceCount ?? 'Unknown'}
-- Average Sentence Length: ${metrics?.avgSentenceLength ?? 'Unknown'} words/sentence
-- Flesch Reading Ease: ${metrics?.fleschScore ?? 'Unknown'} (${metrics?.fleschLabel ?? 'Unknown'})
-- Keyword Count: ${metrics?.keywordCount ?? '0'} times (Density: ${metrics?.keywordDensity ?? '0'}%)
-- In Title: ${metrics?.inTitle ? 'Yes' : 'No'}
-- In First 100 Words: ${metrics?.inFirst100 ? 'Yes' : 'No'}
-- In Headings: ${metrics?.inHeadings ? 'Yes' : 'No'}
-- H1 Count: ${metrics?.h1Count ?? 0} (Logical Hierarchy: ${metrics?.headingsLogicalOrder ? 'Yes' : 'No'})
-${metrics?.headingIssues?.length ? `Heading Issues: ${metrics.headingIssues.join('; ')}` : ''}
+- Word Count: ${sanitizedMetrics?.wordCount ?? 'Unknown'} ${sanitizedMetrics?.thinContentWarning ? '(WARNING: Content is thin under 100 words)' : ''}
+- Sentences: ${sanitizedMetrics?.sentenceCount ?? 'Unknown'}
+- Average Sentence Length: ${sanitizedMetrics?.avgSentenceLength ?? 'Unknown'} words/sentence
+- Flesch Reading Ease: ${sanitizedMetrics?.fleschScore ?? 'Unknown'} (${sanitizedMetrics?.fleschLabel ?? 'Unknown'})
+- Keyword Count: ${sanitizedMetrics?.keywordCount ?? '0'} times (Density: ${sanitizedMetrics?.keywordDensity ?? '0'}%)
+- In Title: ${sanitizedMetrics?.inTitle ? 'Yes' : 'No'}
+- In First 100 Words: ${sanitizedMetrics?.inFirst100 ? 'Yes' : 'No'}
+- In Headings: ${sanitizedMetrics?.inHeadings ? 'Yes' : 'No'}
+- H1 Count: ${sanitizedMetrics?.h1Count ?? 0} (Logical Hierarchy: ${sanitizedMetrics?.headingsLogicalOrder ? 'Yes' : 'No'})
+${sanitizedMetrics?.headingIssues?.length ? `Heading Issues: ${sanitizedMetrics.headingIssues.join('; ')}` : ''}
 
 Page Text Content:
 """
@@ -170,60 +305,112 @@ ${pageContent}
 """
 
 Instructions:
-1. Calculate a fair overall_score (0-100) reflecting on-page optimization, content depth, readability, and intent match. If content is thin (<100 words), penalize accordingly.
+1. Calculate a fair overall_score (0-100) and calibrated score_breakdown (content_depth, readability, keyword_optimization, heading_structure). If content is thin (<100 words), penalize accordingly.
 2. Provide a crisp one-line verdict.
 3. Provide 3 high-converting title suggestions STRICTLY under 60 characters containing the target keyword.
 4. Provide 3 compelling meta descriptions STRICTLY under 155 characters with a clear call-to-action.
-5. Identify semantic keyword gaps and user questions not answered on the page.
-6. Pick 3 specific dense or awkward sentences from the provided text and provide clearer rewrites with reasons.
-7. Provide a prioritized fix_list with High, Medium, and Low actions with one-line reasons.`;
+5. Provide an SEO-friendly URL slug (e.g. /dentist-in-doha).
+6. Provide heading_recommendations: an optimized primary H1 suggestion and a recommended 4-6 section outline of H2/H3 subheadings for search intent coverage.
+7. Identify semantic keyword gaps and user search questions not answered on the page.
+8. Pick 3 specific dense or awkward sentences from the provided text and provide clearer rewrites with reasons.
+9. Provide a prioritized fix_list with High, Medium, and Low actions with one-line reasons.`;
 
-    // Attempt Gemini call with single retry logic for robust JSON extraction
-    const executeCall = async () => {
-      const response = await ai.models.generateContent({
-        model: 'gemini-3.8-flash',
-        contents: promptText,
-        config: {
-          systemInstruction,
-          responseMimeType: 'application/json',
-          responseSchema: auditResponseSchema,
-          temperature: 0.2,
-        },
-      });
+    // Exponential backoff delays: 500ms then 1500ms (max 2 retries, 3 total attempts)
+    const backoffDelays = [500, 1500];
+    let result: any = null;
+    let lastError: any = null;
 
-      const text = response.text?.trim() || '';
-      return JSON.parse(text);
-    };
-
-    let result;
-    try {
-      result = await executeCall();
-    } catch (firstErr) {
-      console.warn('First Gemini audit call failed, retrying once...', firstErr);
+    for (let attempt = 0; attempt <= 2; attempt++) {
       try {
-        result = await executeCall();
-      } catch (retryErr) {
-        console.error('Gemini audit retry failed:', retryErr);
+        const response = await ai.models.generateContent({
+          model: 'gemini-3.8-flash',
+          contents: promptText,
+          config: {
+            systemInstruction,
+            responseMimeType: 'application/json',
+            responseSchema: auditResponseSchema,
+            temperature: 0.2,
+          },
+        });
+
+        const text = response.text?.trim() || '';
+        result = JSON.parse(text);
+        break; // Successfully generated and parsed
+      } catch (err: any) {
+        lastError = err;
+        console.error(`Gemini audit attempt ${attempt + 1} failed:`, err);
+
+        // Only retry if error is transient and attempts remain
+        if (attempt < 2 && isRetryableError(err)) {
+          const delay = backoffDelays[attempt];
+          console.warn(`Retrying Gemini audit call in ${delay}ms...`);
+          await wait(delay);
+        } else {
+          break;
+        }
+      }
+    }
+
+    if (!result) {
+      const status = Number(
+        lastError?.status || lastError?.statusCode || lastError?.response?.status
+      );
+      const errMsg = String(lastError?.message || '').toLowerCase();
+
+      if (
+        status === 429 ||
+        errMsg.includes('rate limit') ||
+        errMsg.includes('quota') ||
+        errMsg.includes('resource_exhausted')
+      ) {
+        res.status(429).json({
+          error: 'API rate limit reached. Please wait a moment and try again.',
+        });
+        return;
+      }
+
+      if (
+        lastError instanceof SyntaxError ||
+        errMsg.includes('json') ||
+        errMsg.includes('parse')
+      ) {
         res.status(502).json({
           error: 'The AI model response could not be formatted properly. Please try running the audit again.',
         });
         return;
       }
+
+      res.status(500).json({
+        error: 'The audit failed. Please try again.',
+      });
+      return;
     }
 
     res.json({ success: true, audit: result });
   } catch (error: any) {
-    console.error('Audit API error:', error);
+    console.error('Audit API uncaught error:', error);
+
+    const status = Number(error?.status || error?.statusCode || error?.response?.status);
+    const errMsg = String(error?.message || '').toLowerCase();
+
+    if (status === 429 || errMsg.includes('rate limit') || errMsg.includes('quota')) {
+      res.status(429).json({
+        error: 'API rate limit reached. Please wait a moment and try again.',
+      });
+      return;
+    }
+
+    // Always return safe sanitized message without leaking internal trace
     res.status(500).json({
-      error: error?.message || 'An unexpected error occurred while analyzing the page.',
+      error: 'The audit failed. Please try again.',
     });
   }
 });
 
 /**
  * Route: POST /api/fetch-url
- * Uses Gemini's urlContext tool to read the web page.
- * If fetching fails, returns a clear instruction to paste content instead.
+ * Validates URL format with new URL() (http/https only),
+ * then uses Gemini's urlContext tool to read the web page.
  */
 app.post('/api/fetch-url', async (req: Request, res: Response): Promise<void> => {
   try {
@@ -233,9 +420,27 @@ app.post('/api/fetch-url', async (req: Request, res: Response): Promise<void> =>
       return;
     }
 
+    const trimmedUrl = url.trim();
+    let parsedUrl: URL;
+    try {
+      parsedUrl = new URL(trimmedUrl);
+    } catch {
+      res.status(400).json({
+        error: 'Invalid URL. Please provide a valid web address starting with http:// or https://.',
+      });
+      return;
+    }
+
+    if (parsedUrl.protocol !== 'http:' && parsedUrl.protocol !== 'https:') {
+      res.status(400).json({
+        error: 'Invalid URL protocol. Only http:// and https:// URLs are supported.',
+      });
+      return;
+    }
+
     const ai = getAIClient();
 
-    const prompt = `Use the urlContext tool to read and extract the main content from the web page at: ${url.trim()}
+    const prompt = `Use the urlContext tool to read and extract the main content from the web page at: ${parsedUrl.toString()}
 Extract the following information:
 1. The page title (if visible in HTML title tag or primary header)
 2. The meta description (if declared in meta tag or initial introductory text)

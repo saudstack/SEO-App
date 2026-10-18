@@ -3,13 +3,15 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef } from 'react';
 import { Header } from './components/Header';
 import { HeroIntro } from './components/HeroIntro';
 import { AuditInputForm } from './components/AuditInputForm';
 import { ScoreGauge } from './components/ScoreGauge';
 import { PreAuditDiagnostics } from './components/PreAuditDiagnostics';
 import { SuggestionsCard } from './components/SuggestionsCard';
+import { SerpPreviewCard } from './components/SerpPreviewCard';
+import { HeadingsCard } from './components/HeadingsCard';
 import { KeywordGapsCard } from './components/KeywordGapsCard';
 import { ReadabilityCard } from './components/ReadabilityCard';
 import { ActionPlanCard } from './components/ActionPlanCard';
@@ -17,9 +19,20 @@ import {
   calculateBrowserMetrics,
   SAMPLE_DOHA_PAGE,
   generateMarkdownReport,
+  generateJsonReport,
 } from './utils/seoCalculations';
-import { AuditResult } from './types/seo';
-import { AlertCircle, FileDown, ArrowUp, RefreshCw } from 'lucide-react';
+import { AuditResult, AuditRequestPayload } from './types/seo';
+import {
+  AlertCircle,
+  FileDown,
+  ArrowUp,
+  RefreshCw,
+  X,
+  Copy,
+  Check,
+  FileJson,
+  Sparkles,
+} from 'lucide-react';
 
 export default function App() {
   // Page Input States
@@ -37,10 +50,37 @@ export default function App() {
   const [urlError, setUrlError] = useState<string | null>(null);
   const [auditResult, setAuditResult] = useState<AuditResult | null>(null);
 
+  // Active selection for interactive SERP preview
+  const [selectedTitleIndex, setSelectedTitleIndex] = useState(0);
+  const [selectedMetaIndex, setSelectedMetaIndex] = useState(0);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  // Network abort and timeout management
+  const abortControllerRef = useRef<AbortController | null>(null);
+  const timeoutIdRef = useRef<NodeJS.Timeout | null>(null);
+  const toastTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
   // Real-time on-page calculations computed entirely in browser before AI call
   const metrics = useMemo(() => {
     return calculateBrowserMetrics(content, targetKeyword, title);
   }, [content, targetKeyword, title]);
+
+  const secKeywordsList = useMemo(() => {
+    return secondaryKeywords
+      .split(',')
+      .map(s => s.trim())
+      .filter(Boolean);
+  }, [secondaryKeywords]);
+
+  const showToast = (msg: string) => {
+    if (toastTimeoutRef.current) {
+      clearTimeout(toastTimeoutRef.current);
+    }
+    setToastMessage(msg);
+    toastTimeoutRef.current = setTimeout(() => {
+      setToastMessage(null);
+    }, 2500);
+  };
 
   /**
    * Loads the realistic sample Doha Dental Clinic page with intentional SEO deficiencies:
@@ -53,8 +93,11 @@ export default function App() {
     setTargetKeyword(SAMPLE_DOHA_PAGE.targetKeyword);
     setSecondaryKeywords(SAMPLE_DOHA_PAGE.secondaryKeywords);
     setContent(SAMPLE_DOHA_PAGE.content);
+    setSelectedTitleIndex(0);
+    setSelectedMetaIndex(0);
     setError(null);
     setUrlError(null);
+    showToast('Sample dental clinic page loaded.');
   };
 
   /**
@@ -68,15 +111,59 @@ export default function App() {
     setMetaDescription('');
     setContent('');
     setAuditResult(null);
+    setSelectedTitleIndex(0);
+    setSelectedMetaIndex(0);
     setError(null);
     setUrlError(null);
   };
 
   /**
-   * Fetches page content from a specified URL via Gemini's urlContext tool
+   * Cancels any active audit or URL fetching request
    */
-  const handleFetchUrl = async () => {
-    if (!pageUrl.trim()) return;
+  const handleCancelAudit = () => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort('USER_CANCELLED');
+      abortControllerRef.current = null;
+    }
+    if (timeoutIdRef.current) {
+      clearTimeout(timeoutIdRef.current);
+      timeoutIdRef.current = null;
+    }
+    setIsLoading(false);
+    setIsFetchingUrl(false);
+    setError('Audit was cancelled.');
+  };
+
+  /**
+   * Fetches page content from a specified URL via Gemini's urlContext tool
+   * with a 60-second AbortController timeout.
+   */
+  const handleFetchUrl = async (): Promise<{ title: string; metaDescription: string; content: string } | null> => {
+    if (!pageUrl.trim()) return null;
+
+    try {
+      const parsed = new URL(pageUrl.trim());
+      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+        setUrlError('Invalid URL protocol. Please use a web address starting with http:// or https://.');
+        return null;
+      }
+    } catch {
+      setUrlError('Invalid URL format. Please provide a valid web address starting with http:// or https://.');
+      return null;
+    }
+
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
+    let isTimedOut = false;
+    const timeoutId = setTimeout(() => {
+      isTimedOut = true;
+      controller.abort('TIMEOUT');
+    }, 60000);
+    timeoutIdRef.current = timeoutId;
 
     setIsFetchingUrl(true);
     setUrlError(null);
@@ -86,6 +173,7 @@ export default function App() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ url: pageUrl.trim() }),
+        signal: controller.signal,
       });
 
       const data = await res.json();
@@ -94,72 +182,123 @@ export default function App() {
           data.error ||
             'Could not read page from this URL. Please paste the page content directly into the text area.'
         );
-        return;
+        return null;
       }
 
       if (data.title) setTitle(data.title);
       if (data.metaDescription) setMetaDescription(data.metaDescription);
       if (data.content) setContent(data.content);
+
+      showToast('Page content fetched successfully.');
+      return {
+        title: data.title || '',
+        metaDescription: data.metaDescription || '',
+        content: data.content || '',
+      };
     } catch (err: any) {
+      if (err.name === 'AbortError' || controller.signal.aborted) {
+        if (isTimedOut) {
+          setUrlError('Reading the page from this URL timed out after 60 seconds. Please paste the content manually.');
+        }
+        return null;
+      }
       setUrlError(
         'Could not read page from this URL. Please paste the page content directly into the text area.'
       );
+      return null;
     } finally {
+      clearTimeout(timeoutId);
+      if (timeoutIdRef.current === timeoutId) {
+        timeoutIdRef.current = null;
+      }
+      if (abortControllerRef.current === controller) {
+        abortControllerRef.current = null;
+      }
       setIsFetchingUrl(false);
     }
   };
 
   /**
    * Submits the pre-calculated metrics and page text to Gemini for structured SEO audit
+   * with a 60-second AbortController timeout and clean cancellation support.
    */
   const handleRunAudit = async () => {
     setError(null);
+    setUrlError(null);
 
-    // Validate inputs
-    if (!content.trim()) {
-      if (pageUrl.trim()) {
-        // If user entered URL but no content, try fetching first
-        await handleFetchUrl();
-        return;
-      }
-      setError('Please paste the page content into the text area to audit.');
-      return;
-    }
+    let activeContent = content;
+    let activeTitle = title;
+    let activeMeta = metaDescription;
 
     if (!targetKeyword.trim()) {
       setError('A primary target keyword is required to benchmark the content.');
       return;
     }
 
+    // Seamless URL-only flow: if content is empty but URL is provided, fetch first then continue
+    if (!activeContent.trim()) {
+      if (pageUrl.trim()) {
+        setIsLoading(true);
+        const fetched = await handleFetchUrl();
+        if (!fetched || !fetched.content.trim()) {
+          setIsLoading(false);
+          return;
+        }
+        activeContent = fetched.content;
+        activeTitle = fetched.title;
+        activeMeta = fetched.metaDescription;
+      } else {
+        setError('Please paste the page content or provide a page URL to audit.');
+        return;
+      }
+    }
+
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
+    let isTimedOut = false;
+    const timeoutId = setTimeout(() => {
+      isTimedOut = true;
+      controller.abort('TIMEOUT');
+    }, 60000);
+    timeoutIdRef.current = timeoutId;
+
     setIsLoading(true);
 
     try {
-      const secKeywordsList = secondaryKeywords
-        .split(',')
-        .map(s => s.trim())
-        .filter(Boolean);
+      // Compute browser heuristics for active content
+      const activeMetrics = calculateBrowserMetrics(activeContent, targetKeyword.trim(), activeTitle);
+
+      const payload: AuditRequestPayload = {
+        pageContent: activeContent,
+        title: activeTitle,
+        metaDescription: activeMeta,
+        targetKeyword: targetKeyword.trim(),
+        secondaryKeywords: secKeywordsList,
+        pageUrl: pageUrl.trim() || undefined,
+        metrics: activeMetrics,
+      };
 
       const response = await fetch('/api/audit', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          pageContent: content,
-          title,
-          metaDescription,
-          targetKeyword: targetKeyword.trim(),
-          secondaryKeywords: secKeywordsList,
-          pageUrl: pageUrl.trim() || undefined,
-          metrics,
-        }),
+        body: JSON.stringify(payload),
+        signal: controller.signal,
       });
 
       const data = await response.json();
 
       if (!response.ok || !data.success) {
-        throw new Error(data.error || 'Failed to complete the SEO audit.');
+        throw new Error(data.error || 'The audit failed. Please try again.');
       }
 
       setAuditResult(data.audit);
+      setSelectedTitleIndex(0);
+      setSelectedMetaIndex(0);
+      showToast('SEO audit completed successfully!');
 
       // Scroll smoothly to results section
       setTimeout(() => {
@@ -169,12 +308,22 @@ export default function App() {
         });
       }, 100);
     } catch (err: any) {
+      if (err.name === 'AbortError' || controller.signal.aborted) {
+        if (isTimedOut) {
+          setError('The audit timed out after 60 seconds. Please try again.');
+        }
+        return;
+      }
       console.error('Audit execution error:', err);
-      setError(
-        err.message ||
-          'An unexpected error occurred while communicating with the audit service. Please try again.'
-      );
+      setError(err.message || 'The audit failed. Please try again.');
     } finally {
+      clearTimeout(timeoutId);
+      if (timeoutIdRef.current === timeoutId) {
+        timeoutIdRef.current = null;
+      }
+      if (abortControllerRef.current === controller) {
+        abortControllerRef.current = null;
+      }
       setIsLoading(false);
     }
   };
@@ -184,11 +333,6 @@ export default function App() {
    */
   const handleDownloadReport = () => {
     if (!auditResult) return;
-
-    const secKeywordsList = secondaryKeywords
-      .split(',')
-      .map(s => s.trim())
-      .filter(Boolean);
 
     const markdown = generateMarkdownReport({
       title: title || 'Web Page SEO Audit',
@@ -208,14 +352,71 @@ export default function App() {
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
+    showToast('Markdown report downloaded.');
+  };
+
+  /**
+   * Generates and downloads the full audit report as a structured JSON file
+   */
+  const handleDownloadJson = () => {
+    if (!auditResult) return;
+
+    const jsonStr = generateJsonReport({
+      title: title || 'Web Page SEO Audit',
+      pageUrl: pageUrl || undefined,
+      targetKeyword,
+      secondaryKeywords: secKeywordsList,
+      metrics,
+      audit: auditResult,
+    });
+
+    const blob = new Blob([jsonStr], { type: 'application/json;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `page-audit-${targetKeyword.replace(/[^a-z0-9]/gi, '-').toLowerCase() || 'report'}.json`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+    showToast('JSON report downloaded.');
+  };
+
+  /**
+   * Copies the full audit report as Markdown to the user's clipboard
+   */
+  const handleCopyReport = () => {
+    if (!auditResult) return;
+
+    const markdown = generateMarkdownReport({
+      title: title || 'Web Page SEO Audit',
+      pageUrl: pageUrl || undefined,
+      targetKeyword,
+      secondaryKeywords: secKeywordsList,
+      metrics,
+      audit: auditResult,
+    });
+
+    navigator.clipboard.writeText(markdown);
+    showToast('Full Markdown report copied to clipboard!');
   };
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col font-sans">
+      {/* Toast Notification */}
+      {toastMessage && (
+        <div className="fixed bottom-6 right-6 z-50 bg-slate-900 text-white text-xs font-semibold px-4 py-2.5 rounded-lg shadow-lg flex items-center gap-2 animate-fade-in border border-slate-700">
+          <Sparkles className="w-4 h-4 text-emerald-400" />
+          <span>{toastMessage}</span>
+        </div>
+      )}
+
       {/* Top Bar Header */}
       <Header
         onLoadSample={handleLoadSample}
         onDownloadReport={auditResult ? handleDownloadReport : undefined}
+        onDownloadJson={auditResult ? handleDownloadJson : undefined}
+        onCopyReport={auditResult ? handleCopyReport : undefined}
         hasAuditResult={!!auditResult}
       />
 
@@ -266,6 +467,7 @@ export default function App() {
           isFetchingUrl={isFetchingUrl}
           onFetchUrl={handleFetchUrl}
           urlError={urlError}
+          onCancelAudit={handleCancelAudit}
         />
 
         {/* Audit Results Section */}
@@ -283,12 +485,23 @@ export default function App() {
                 </h2>
               </div>
 
-              <div className="flex items-center gap-2.5">
+              <div className="flex flex-wrap items-center gap-2">
+                {isLoading && (
+                  <button
+                    type="button"
+                    onClick={handleCancelAudit}
+                    className="px-3 py-1.5 text-xs font-semibold text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-lg transition-colors flex items-center gap-1.5 shadow-xs"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                    Cancel
+                  </button>
+                )}
+
                 <button
                   type="button"
                   onClick={handleRunAudit}
                   disabled={isLoading}
-                  className="px-3.5 py-1.5 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-100 border border-slate-200 rounded-lg transition-colors flex items-center gap-1.5 shadow-xs"
+                  className="px-3 py-1.5 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-100 border border-slate-200 rounded-lg transition-colors flex items-center gap-1.5 shadow-xs"
                 >
                   <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} />
                   Re-analyze
@@ -296,20 +509,41 @@ export default function App() {
 
                 <button
                   type="button"
+                  onClick={handleCopyReport}
+                  className="px-3 py-1.5 text-xs font-medium text-slate-700 bg-white hover:bg-slate-50 border border-slate-200 rounded-lg transition-colors flex items-center gap-1.5 shadow-xs"
+                  title="Copy full Markdown report to clipboard"
+                >
+                  <Copy className="w-3.5 h-3.5 text-slate-600" />
+                  <span>Copy Report</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleDownloadJson}
+                  className="px-3 py-1.5 text-xs font-medium text-slate-700 bg-white hover:bg-slate-50 border border-slate-200 rounded-lg transition-colors hidden sm:flex items-center gap-1.5 shadow-xs"
+                  title="Export raw JSON"
+                >
+                  <FileJson className="w-3.5 h-3.5 text-slate-600" />
+                  <span>JSON</span>
+                </button>
+
+                <button
+                  type="button"
                   onClick={handleDownloadReport}
-                  className="px-4 py-1.5 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg shadow-sm transition-colors flex items-center gap-1.5"
+                  className="px-3.5 py-1.5 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg shadow-sm transition-colors flex items-center gap-1.5"
                 >
                   <FileDown className="w-3.5 h-3.5" />
-                  Download Report (.md)
+                  <span>Export Report (.md)</span>
                 </button>
               </div>
             </div>
 
-            {/* Score Gauge & Summary Matrix */}
+            {/* Score Gauge & 4-Pillar Score Breakdown */}
             <ScoreGauge
               score={auditResult.overall_score}
               verdict={auditResult.verdict}
               metrics={metrics}
+              scoreBreakdown={auditResult.score_breakdown}
             />
 
             {/* Pre-Audit Diagnostics Card */}
@@ -322,11 +556,49 @@ export default function App() {
             <SuggestionsCard
               titleSuggestions={auditResult.title_suggestions}
               metaSuggestions={auditResult.meta_description_suggestions}
+              currentTitle={title}
+              currentMeta={metaDescription}
+              selectedTitleIndex={selectedTitleIndex}
+              selectedMetaIndex={selectedMetaIndex}
+              onSelectTitle={setSelectedTitleIndex}
+              onSelectMeta={setSelectedMetaIndex}
+            />
+
+            {/* Interactive SERP Preview Card */}
+            <SerpPreviewCard
+              pageUrl={pageUrl}
+              targetKeyword={targetKeyword}
+              selectedTitle={auditResult.title_suggestions[selectedTitleIndex] || auditResult.title_suggestions[0] || title}
+              selectedMeta={auditResult.meta_description_suggestions[selectedMetaIndex] || auditResult.meta_description_suggestions[0] || metaDescription}
+              suggestedSlug={auditResult.url_slug_suggestion}
+              titleSuggestions={auditResult.title_suggestions}
+              metaSuggestions={auditResult.meta_description_suggestions}
+              onSelectTitle={(t) => {
+                const idx = auditResult.title_suggestions.indexOf(t);
+                if (idx !== -1) setSelectedTitleIndex(idx);
+              }}
+              onSelectMeta={(m) => {
+                const idx = auditResult.meta_description_suggestions.indexOf(m);
+                if (idx !== -1) setSelectedMetaIndex(idx);
+              }}
+            />
+
+            {/* Headings & Outline Recommendations */}
+            <HeadingsCard
+              headingRecommendations={auditResult.heading_recommendations}
+              urlSlug={auditResult.url_slug_suggestion}
+              targetKeyword={targetKeyword}
+              currentHeadings={metrics.headingsList}
+              h1Count={metrics.h1Count}
+              headingsLogicalOrder={metrics.headingsLogicalOrder}
+              headingIssues={metrics.headingIssues}
             />
 
             {/* Keyword Gaps & Search Intent Opportunities */}
             <KeywordGapsCard
               keywordGaps={auditResult.keyword_gaps}
+              targetKeyword={targetKeyword}
+              secondaryKeywords={secKeywordsList}
             />
 
             {/* Readability Improvements & Rewrites */}
@@ -339,18 +611,18 @@ export default function App() {
               fixes={auditResult.fix_list}
             />
 
-            {/* Bottom Download Bar */}
+            {/* Bottom Download & Export Bar */}
             <div className="p-6 rounded-xl bg-white border border-slate-200 shadow-sm flex flex-col sm:flex-row items-center justify-between gap-4">
               <div>
                 <h3 className="text-base font-bold text-slate-900">
-                  Export Complete Audit Report
+                  Export &amp; Share Complete SEO Audit
                 </h3>
                 <p className="text-xs text-slate-500 mt-0.5">
-                  Download a structured, publication-ready Markdown file including all suggestions and heuristics.
+                  Download a structured, publication-ready Markdown or JSON report, or copy to clipboard.
                 </p>
               </div>
 
-              <div className="flex items-center gap-3">
+              <div className="flex flex-wrap items-center gap-2.5">
                 <button
                   type="button"
                   onClick={() => {
@@ -359,7 +631,25 @@ export default function App() {
                   className="px-3.5 py-2 text-xs font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors flex items-center gap-1.5"
                 >
                   <ArrowUp className="w-3.5 h-3.5" />
-                  Back to Top
+                  Top
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleCopyReport}
+                  className="px-3.5 py-2 text-xs font-medium text-slate-700 bg-white hover:bg-slate-50 border border-slate-200 rounded-lg transition-colors flex items-center gap-1.5 shadow-xs"
+                >
+                  <Copy className="w-3.5 h-3.5 text-slate-600" />
+                  <span>Copy Report</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleDownloadJson}
+                  className="px-3.5 py-2 text-xs font-medium text-slate-700 bg-white hover:bg-slate-50 border border-slate-200 rounded-lg transition-colors flex items-center gap-1.5 shadow-xs"
+                >
+                  <FileJson className="w-3.5 h-3.5 text-slate-600" />
+                  <span>Export JSON</span>
                 </button>
 
                 <button
@@ -368,7 +658,7 @@ export default function App() {
                   className="px-4 py-2 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg shadow-sm transition-colors flex items-center gap-1.5"
                 >
                   <FileDown className="w-3.5 h-3.5" />
-                  Download Report (.md)
+                  <span>Download Report (.md)</span>
                 </button>
               </div>
             </div>
@@ -382,7 +672,7 @@ export default function App() {
           <div className="flex items-center gap-2">
             <span className="font-semibold text-slate-700">Page Auditor</span>
             <span>·</span>
-            <span>On-page SEO heuristics & content strategy</span>
+            <span>On-page SEO heuristics &amp; content strategy</span>
           </div>
           <div>
             Built with modern on-page diagnostics &amp; Gemini

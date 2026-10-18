@@ -5,7 +5,7 @@
 
 import React from 'react';
 import { BrowserMetrics } from '../types/seo';
-import { CheckCircle2, XCircle, AlertTriangle, HelpCircle } from 'lucide-react';
+import { CheckCircle2, XCircle, AlertTriangle } from 'lucide-react';
 
 interface PreAuditDiagnosticsProps {
   metrics: BrowserMetrics;
