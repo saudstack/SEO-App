@@ -1,0 +1,6 @@
+{
+  "name": "Page Auditor",
+  "description": "Comprehensive on-page SEO auditor with instant readability scoring, keyword density checks, heading hierarchy analysis, and AI recommendations.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
