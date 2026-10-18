@@ -77,6 +77,9 @@ export const Header: React.FC<HeaderProps> = ({
               <a href="#action-plan" className="hover:text-slate-900 transition-colors">
                 Fixes
               </a>
+              <a href="#checklist" className="hover:text-slate-900 transition-colors">
+                Checklist
+              </a>
             </>
           )}
         </nav>

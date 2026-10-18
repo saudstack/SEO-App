@@ -15,6 +15,7 @@ import { HeadingsCard } from './components/HeadingsCard';
 import { KeywordGapsCard } from './components/KeywordGapsCard';
 import { ReadabilityCard } from './components/ReadabilityCard';
 import { ActionPlanCard } from './components/ActionPlanCard';
+import { InteractiveChecklist } from './components/InteractiveChecklist';
 import {
   calculateBrowserMetrics,
   SAMPLE_DOHA_PAGE,
@@ -609,6 +610,12 @@ export default function App() {
             {/* Prioritized Action Plan */}
             <ActionPlanCard
               fixes={auditResult.fix_list}
+            />
+
+            {/* Interactive Checklist */}
+            <InteractiveChecklist
+              fixes={auditResult.fix_list}
+              auditId={`${targetKeyword}-${title || 'default'}`}
             />
 
             {/* Bottom Download & Export Bar */}

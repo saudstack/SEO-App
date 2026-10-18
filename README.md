@@ -24,7 +24,14 @@ Page Auditor evaluates any web page's content against a primary target keyword a
    - **Readability Improvements**: Identifies specific dense or passive sentences from the copy and provides clear, simplified rewrites.
    - **Prioritized Action Plan**: Ranked roadmap items labeled **High**, **Medium**, or **Low** with specific impact reasons.
 
-3. **Copy & Export Utilities**:
+3. **Interactive SEO Checklist (Session-Persisted)**:
+   - **Live Progress Tracking**: Interactive checkboxes to mark off tasks as fixes are made to your website, complete with progress percentage and milestone celebration banner.
+   - **Session Persistence**: Checked states persist automatically in `sessionStorage` throughout your session, surviving page refreshes and tab switching.
+   - **Custom Tasks**: Add custom webmaster action items (e.g. submit XML sitemap, update canonical tag, add internal links) with customizable priority badges.
+   - **Quick Filters & State Controls**: Filter by All, Pending, or Completed tasks; one-click "Mark All Complete", "Clear All", or "Reset to Audit".
+   - **Export Checklist Status**: Copy the live checklist state with progress stats as formatted Markdown (`- [x]` / `- [ ]`) for GitHub, Jira, Linear, or Notion.
+
+4. **Copy & Export Utilities**:
    - **One-Click Copy**: Copy individual titles, meta descriptions, HTML tags, recommended H1, heading outline as Markdown, keyword lists (CSV or bulleted), readability rewrites, and action tasks.
    - **Copy as Checklist**: Exports the prioritized action plan formatted as Markdown checkboxes (`- [ ] [HIGH] ...`) ready for Jira, Linear, Notion, or GitHub issues.
    - **Download Markdown Report (`.md`)**: Full, publication-ready audit report.
