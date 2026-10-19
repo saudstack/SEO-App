@@ -16,13 +16,11 @@ import { HeadingsCard } from './components/HeadingsCard';
 import { KeywordGapsCard } from './components/KeywordGapsCard';
 import { ReadabilityCard } from './components/ReadabilityCard';
 import { ActionPlanCard } from './components/ActionPlanCard';
-import { InteractiveChecklist } from './components/InteractiveChecklist';
 import {
   calculateBrowserMetrics,
-  SAMPLE_DOHA_PAGE,
   generateMarkdownReport,
-  generateJsonReport,
 } from './utils/seoCalculations';
+import { generatePdfReport } from './utils/pdfGenerator';
 import { AuditResult, AuditRequestPayload } from './types/seo';
 import {
   AlertCircle,
@@ -31,9 +29,9 @@ import {
   RefreshCw,
   X,
   Copy,
-  Check,
-  FileJson,
   Sparkles,
+  FileText,
+  Activity,
 } from 'lucide-react';
 
 export default function App() {
@@ -85,24 +83,6 @@ export default function App() {
   };
 
   /**
-   * Loads the realistic sample Doha Dental Clinic page with intentional SEO deficiencies:
-   * thin title, missing meta, skipped heading hierarchy, low word count.
-   */
-  const handleLoadSample = () => {
-    setPageUrl(SAMPLE_DOHA_PAGE.url);
-    setTitle(SAMPLE_DOHA_PAGE.title);
-    setMetaDescription(SAMPLE_DOHA_PAGE.metaDescription);
-    setTargetKeyword(SAMPLE_DOHA_PAGE.targetKeyword);
-    setSecondaryKeywords(SAMPLE_DOHA_PAGE.secondaryKeywords);
-    setContent(SAMPLE_DOHA_PAGE.content);
-    setSelectedTitleIndex(0);
-    setSelectedMetaIndex(0);
-    setError(null);
-    setUrlError(null);
-    showToast('Sample dental clinic page loaded.');
-  };
-
-  /**
    * Clears form inputs and previous audit results
    */
   const handleReset = () => {
@@ -146,11 +126,15 @@ export default function App() {
     try {
       const parsed = new URL(pageUrl.trim());
       if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-        setUrlError('Invalid URL protocol. Please use a web address starting with http:// or https://.');
+        const msg = "Couldn't read that page, please paste the text instead";
+        setUrlError(msg);
+        setError(msg);
         return null;
       }
     } catch {
-      setUrlError('Invalid URL format. Please provide a valid web address starting with http:// or https://.');
+      const msg = "Couldn't read that page, please paste the text instead";
+      setUrlError(msg);
+      setError(msg);
       return null;
     }
 
@@ -180,10 +164,11 @@ export default function App() {
 
       const data = await res.json();
       if (!res.ok || !data.success) {
-        setUrlError(
-          data.error ||
-            'Could not read page from this URL. Please paste the page content directly into the text area.'
-        );
+        const msg = data.error || "Couldn't read that page, please paste the text instead";
+        setUrlError(msg);
+        setError(msg);
+        setIsFetchingUrl(false);
+        setIsLoading(false);
         return null;
       }
 
@@ -198,15 +183,13 @@ export default function App() {
         content: data.content || '',
       };
     } catch (err: any) {
-      if (err.name === 'AbortError' || controller.signal.aborted) {
-        if (isTimedOut) {
-          setUrlError('Reading the page from this URL timed out after 60 seconds. Please paste the content manually.');
-        }
-        return null;
-      }
-      setUrlError(
-        'Could not read page from this URL. Please paste the page content directly into the text area.'
-      );
+      const msg = isTimedOut
+        ? "Couldn't read that page, please paste the text instead"
+        : "Couldn't read that page, please paste the text instead";
+      setUrlError(msg);
+      setError(msg);
+      setIsFetchingUrl(false);
+      setIsLoading(false);
       return null;
     } finally {
       clearTimeout(timeoutId);
@@ -244,6 +227,8 @@ export default function App() {
         const fetched = await handleFetchUrl();
         if (!fetched || !fetched.content.trim()) {
           setIsLoading(false);
+          setIsFetchingUrl(false);
+          setError("Couldn't read that page, please paste the text instead");
           return;
         }
         activeContent = fetched.content;
@@ -251,6 +236,7 @@ export default function App() {
         activeMeta = fetched.metaDescription;
       } else {
         setError('Please paste the page content or provide a page URL to audit.');
+        setIsLoading(false);
         return;
       }
     }
@@ -294,7 +280,7 @@ export default function App() {
       const data = await response.json();
 
       if (!response.ok || !data.success) {
-        throw new Error(data.error || 'The audit failed. Please try again.');
+        throw new Error(data.error || "Couldn't complete the AI analysis. Your instant browser diagnostics are shown below.");
       }
 
       setAuditResult(data.audit);
@@ -310,14 +296,19 @@ export default function App() {
         });
       }, 100);
     } catch (err: any) {
+      setIsLoading(false);
       if (err.name === 'AbortError' || controller.signal.aborted) {
         if (isTimedOut) {
-          setError('The audit timed out after 60 seconds. Please try again.');
+          setError('The audit request timed out after 60 seconds. Please try again.');
         }
         return;
       }
       console.error('Audit execution error:', err);
-      setError(err.message || 'The audit failed. Please try again.');
+      setError(
+        err.message?.includes('Couldn') || err.message?.includes('rate limit')
+          ? err.message
+          : "Couldn't complete the AI analysis. Your instant browser diagnostics are shown below."
+      );
     } finally {
       clearTimeout(timeoutId);
       if (timeoutIdRef.current === timeoutId) {
@@ -358,30 +349,21 @@ export default function App() {
   };
 
   /**
-   * Generates and downloads the full audit report as a structured JSON file
+   * Generates and downloads the full audit report as a clean, publication-grade PDF document
    */
-  const handleDownloadJson = () => {
+  const handleDownloadPdf = () => {
     if (!auditResult) return;
 
-    const jsonStr = generateJsonReport({
+    generatePdfReport({
       title: title || 'Web Page SEO Audit',
-      pageUrl: pageUrl || undefined,
+      pageUrl: pageUrl.trim() || undefined,
       targetKeyword,
       secondaryKeywords: secKeywordsList,
       metrics,
       audit: auditResult,
     });
 
-    const blob = new Blob([jsonStr], { type: 'application/json;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `page-audit-${targetKeyword.replace(/[^a-z0-9]/gi, '-').toLowerCase() || 'report'}.json`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
-    showToast('JSON report downloaded.');
+    showToast('PDF report generated and downloaded.');
   };
 
   /**
@@ -415,9 +397,8 @@ export default function App() {
 
       {/* Top Bar Header */}
       <Header
-        onLoadSample={handleLoadSample}
         onDownloadReport={auditResult ? handleDownloadReport : undefined}
-        onDownloadJson={auditResult ? handleDownloadJson : undefined}
+        onDownloadPdf={auditResult ? handleDownloadPdf : undefined}
         onCopyReport={auditResult ? handleCopyReport : undefined}
         hasAuditResult={!!auditResult}
       />
@@ -433,7 +414,7 @@ export default function App() {
             <div className="flex items-start gap-3">
               <AlertCircle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
               <div>
-                <h4 className="text-sm font-bold">Audit Issue Encountered</h4>
+                <h4 className="text-sm font-bold">Notice</h4>
                 <p className="text-xs text-rose-700 mt-0.5">{error}</p>
               </div>
             </div>
@@ -463,7 +444,6 @@ export default function App() {
           setContent={setContent}
           metrics={metrics}
           onAudit={handleRunAudit}
-          onLoadSample={handleLoadSample}
           onReset={handleReset}
           isLoading={isLoading}
           isFetchingUrl={isFetchingUrl}
@@ -472,7 +452,31 @@ export default function App() {
           onCancelAudit={handleCancelAudit}
         />
 
-        {/* Audit Results Section */}
+        {/* Instant Browser Diagnostics Section (Shown if Gemini/Fetch failed or while reviewing copy before audit) */}
+        {!auditResult && (error || content.trim().length > 0) && (
+          <div className="mt-8 space-y-4">
+            <div className="flex items-center justify-between pb-2 border-b border-slate-200">
+              <div className="flex items-center gap-2">
+                <Activity className="w-4 h-4 text-indigo-600" />
+                <h3 className="text-lg font-bold text-slate-900 tracking-tight">
+                  Instant Browser Diagnostics
+                </h3>
+                <span className="text-xs text-slate-500 font-medium hidden sm:inline">
+                  (Computed in real time from body text)
+                </span>
+              </div>
+              <span className="text-xs font-mono text-slate-500">
+                Target: &ldquo;{targetKeyword || 'None'}&rdquo;
+              </span>
+            </div>
+            <PreAuditDiagnostics
+              metrics={metrics}
+              targetKeyword={targetKeyword}
+            />
+          </div>
+        )}
+
+        {/* Comprehensive Audit Results Section */}
         {auditResult && (
           <div id="results-overview" className="mt-12 space-y-8 scroll-mt-24">
             <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 pb-2 border-b border-slate-200">
@@ -521,21 +525,22 @@ export default function App() {
 
                 <button
                   type="button"
-                  onClick={handleDownloadJson}
-                  className="px-3 py-1.5 text-xs font-medium text-slate-700 bg-white hover:bg-slate-50 border border-slate-200 rounded-lg transition-colors hidden sm:flex items-center gap-1.5 shadow-xs"
-                  title="Export raw JSON"
+                  onClick={handleDownloadReport}
+                  className="px-3 py-1.5 text-xs font-medium text-slate-700 bg-white hover:bg-slate-50 border border-slate-200 rounded-lg transition-colors flex items-center gap-1.5 shadow-xs"
+                  title="Export Markdown report"
                 >
-                  <FileJson className="w-3.5 h-3.5 text-slate-600" />
-                  <span>JSON</span>
+                  <FileText className="w-3.5 h-3.5 text-slate-600" />
+                  <span>Export Report (.md)</span>
                 </button>
 
                 <button
                   type="button"
-                  onClick={handleDownloadReport}
+                  onClick={handleDownloadPdf}
                   className="px-3.5 py-1.5 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg shadow-sm transition-colors flex items-center gap-1.5"
+                  title="Download clean PDF report"
                 >
                   <FileDown className="w-3.5 h-3.5" />
-                  <span>Export Report (.md)</span>
+                  <span>Download PDF Report</span>
                 </button>
               </div>
             </div>
@@ -616,17 +621,13 @@ export default function App() {
             {/* Readability Improvements & Rewrites */}
             <ReadabilityCard
               notes={auditResult.readability_notes}
+              content={content}
+              metrics={metrics}
             />
 
             {/* Prioritized Action Plan */}
             <ActionPlanCard
               fixes={auditResult.fix_list}
-            />
-
-            {/* Interactive Checklist */}
-            <InteractiveChecklist
-              fixes={auditResult.fix_list}
-              auditId={`${targetKeyword}-${title || 'default'}`}
             />
 
             {/* Bottom Download & Export Bar */}
@@ -636,7 +637,7 @@ export default function App() {
                   Export &amp; Share Complete SEO Audit
                 </h3>
                 <p className="text-xs text-slate-500 mt-0.5">
-                  Download a structured, publication-ready Markdown or JSON report, or copy to clipboard.
+                  Download a structured, publication-ready PDF or Markdown report, or copy to clipboard.
                 </p>
               </div>
 
@@ -663,20 +664,20 @@ export default function App() {
 
                 <button
                   type="button"
-                  onClick={handleDownloadJson}
+                  onClick={handleDownloadReport}
                   className="px-3.5 py-2 text-xs font-medium text-slate-700 bg-white hover:bg-slate-50 border border-slate-200 rounded-lg transition-colors flex items-center gap-1.5 shadow-xs"
                 >
-                  <FileJson className="w-3.5 h-3.5 text-slate-600" />
-                  <span>Export JSON</span>
+                  <FileText className="w-3.5 h-3.5 text-slate-600" />
+                  <span>Download Report (.md)</span>
                 </button>
 
                 <button
                   type="button"
-                  onClick={handleDownloadReport}
+                  onClick={handleDownloadPdf}
                   className="px-4 py-2 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg shadow-sm transition-colors flex items-center gap-1.5"
                 >
                   <FileDown className="w-3.5 h-3.5" />
-                  <span>Download Report (.md)</span>
+                  <span>Download PDF Report</span>
                 </button>
               </div>
             </div>

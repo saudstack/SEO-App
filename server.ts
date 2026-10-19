@@ -20,7 +20,11 @@ const app = express();
 // Lowered JSON limit from 10mb to 1mb for safety against payload bloating
 app.use(express.json({ limit: '1mb' }));
 
-const port = Number(process.env.PORT) || 3000;
+// Parse port from CLI argument or environment variable (default to 3000 per AI Studio guidelines)
+const args = process.argv.slice(2);
+const portArgIndex = args.indexOf('--port');
+const cliPort = portArgIndex !== -1 && args[portArgIndex + 1] ? Number(args[portArgIndex + 1]) : null;
+const port = cliPort || Number(process.env.PORT) || 3000;
 
 // Maximum allowed input lengths
 const MAX_CONTENT_CHARS = 50000;
@@ -467,7 +471,7 @@ Extract the following information:
     const parsed = JSON.parse(response.text?.trim() || '{}');
     if (!parsed.content || parsed.content.length < 20) {
       res.status(422).json({
-        error: 'Could not read page from this URL. Please paste the page content directly into the text area.',
+        error: "Couldn't read that page, please paste the text instead",
       });
       return;
     }
@@ -481,7 +485,7 @@ Extract the following information:
   } catch (err: any) {
     console.error('Fetch URL error:', err);
     res.status(422).json({
-      error: 'Could not read page from this URL. Please paste the page content directly into the text area.',
+      error: "Couldn't read that page, please paste the text instead",
     });
   }
 });

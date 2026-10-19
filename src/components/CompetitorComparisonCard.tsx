@@ -264,16 +264,7 @@ export function CompetitorComparisonCard({
 
           {/* Quick Actions */}
           <div className="flex flex-wrap items-center gap-2">
-            {!competitorData ? (
-              <button
-                type="button"
-                onClick={handleLoadSample}
-                className="px-3.5 py-1.5 text-xs font-semibold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200/80 rounded-lg transition-colors flex items-center gap-1.5 shadow-xs"
-              >
-                <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
-                Sample Competitor
-              </button>
-            ) : (
+            {competitorData && (
               <>
                 <button
                   type="button"
@@ -471,17 +462,6 @@ export function CompetitorComparisonCard({
                 Discover structural topics, H2 categories, and questions your page omitted.
               </p>
             </div>
-          </div>
-
-          <div className="mt-6">
-            <button
-              type="button"
-              onClick={handleLoadSample}
-              className="inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded-xl transition-all shadow-xs"
-            >
-              <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
-              <span>Load Sample Competitor (Al Meezan Dental Doha)</span>
-            </button>
           </div>
         </div>
       ) : (

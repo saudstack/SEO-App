@@ -4,20 +4,18 @@
  */
 
 import React, { useState } from 'react';
-import { SearchCheck, FileDown, Sparkles, Copy, Check, FileJson } from 'lucide-react';
+import { SearchCheck, FileDown, Copy, Check, FileText } from 'lucide-react';
 
 interface HeaderProps {
-  onLoadSample: () => void;
   onDownloadReport?: () => void;
-  onDownloadJson?: () => void;
+  onDownloadPdf?: () => void;
   onCopyReport?: () => void;
   hasAuditResult: boolean;
 }
 
 export const Header: React.FC<HeaderProps> = ({
-  onLoadSample,
   onDownloadReport,
-  onDownloadJson,
+  onDownloadPdf,
   onCopyReport,
   hasAuditResult,
 }) => {
@@ -80,25 +78,12 @@ export const Header: React.FC<HeaderProps> = ({
               <a href="#action-plan" className="hover:text-slate-900 transition-colors">
                 Fixes
               </a>
-              <a href="#checklist" className="hover:text-slate-900 transition-colors">
-                Checklist
-              </a>
             </>
           )}
         </nav>
 
         {/* Zone 3: Primary Action buttons */}
         <div className="flex items-center gap-2 shrink-0">
-          <button
-            type="button"
-            onClick={onLoadSample}
-            className="px-3 py-1.5 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors flex items-center gap-1.5"
-            title="Load sample dental clinic page"
-          >
-            <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
-            <span className="hidden sm:inline">Load</span> Sample
-          </button>
-
           {hasAuditResult && (
             <>
               {onCopyReport && (
@@ -126,26 +111,27 @@ export const Header: React.FC<HeaderProps> = ({
                 </button>
               )}
 
-              {onDownloadJson && (
-                <button
-                  type="button"
-                  onClick={onDownloadJson}
-                  className="px-2.5 py-1.5 text-xs font-medium text-slate-700 bg-white hover:bg-slate-50 border border-slate-200 rounded-lg transition-colors hidden md:flex items-center gap-1 shadow-xs"
-                  title="Download raw audit JSON"
-                >
-                  <FileJson className="w-3.5 h-3.5 text-slate-600" />
-                  <span>JSON</span>
-                </button>
-              )}
-
               {onDownloadReport && (
                 <button
                   type="button"
                   onClick={onDownloadReport}
+                  className="px-3 py-1.5 text-xs font-medium text-slate-700 bg-white hover:bg-slate-50 border border-slate-200 rounded-lg transition-colors hidden sm:flex items-center gap-1.5 shadow-xs"
+                  title="Export Markdown report"
+                >
+                  <FileText className="w-3.5 h-3.5 text-slate-600" />
+                  <span>Markdown</span>
+                </button>
+              )}
+
+              {onDownloadPdf && (
+                <button
+                  type="button"
+                  onClick={onDownloadPdf}
                   className="px-3.5 py-1.5 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg shadow-sm transition-colors flex items-center gap-1.5"
+                  title="Download clean PDF audit report"
                 >
                   <FileDown className="w-3.5 h-3.5" />
-                  <span>Export Report</span>
+                  <span>Download PDF Report</span>
                 </button>
               )}
             </>

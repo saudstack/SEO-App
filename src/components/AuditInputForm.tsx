@@ -32,7 +32,6 @@ interface AuditInputFormProps {
   setContent: (val: string) => void;
   metrics: BrowserMetrics;
   onAudit: () => void;
-  onLoadSample: () => void;
   onReset: () => void;
   isLoading: boolean;
   isFetchingUrl: boolean;
@@ -56,7 +55,6 @@ export const AuditInputForm: React.FC<AuditInputFormProps> = ({
   setContent,
   metrics,
   onAudit,
-  onLoadSample,
   onReset,
   isLoading,
   isFetchingUrl,
@@ -81,19 +79,12 @@ export const AuditInputForm: React.FC<AuditInputFormProps> = ({
         <div className="flex items-center gap-2">
           <button
             type="button"
-            onClick={onLoadSample}
-            className="px-3 py-1.5 text-xs font-semibold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded-lg transition-colors flex items-center gap-1.5"
-          >
-            <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
-            Load Sample Page
-          </button>
-          <button
-            type="button"
             onClick={onReset}
-            className="p-1.5 text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded-lg transition-colors"
+            className="px-3 py-1.5 text-xs font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-100 border border-slate-200 rounded-lg transition-colors flex items-center gap-1.5"
             title="Clear all fields"
           >
-            <RotateCcw className="w-4 h-4" />
+            <RotateCcw className="w-3.5 h-3.5" />
+            <span>Clear Fields</span>
           </button>
         </div>
       </div>

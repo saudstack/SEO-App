@@ -21,7 +21,7 @@ Page Auditor evaluates any web page's content against a primary target keyword a
    - **Interactive Google SERP Preview**: Desktop and Mobile preview of your title, URL slug, and meta description on Google search results, with one-click **Copy HTML Meta Tags**.
    - **Headings & Outline Recommendations**: Recommends an optimized primary H1 tag and a structured 4–6 section H2/H3 outline satisfying user search journey intent.
    - **Keyword Gaps & Intent Opportunities**: Highlights missing topical entities and real user questions not yet answered on the page, filterable by type.
-   - **Readability Improvements**: Identifies specific dense or passive sentences from the copy and provides clear, simplified rewrites.
+   - **Visual Readability & Sentence Analytics (Recharts)**: Interactive sentence complexity distribution (<10w, 10–20w, 21–30w, 30+w) and word/syllable distribution charts rendered with Recharts, paired with targeted plain-English rewrites and dense sentence alerts.
    - **Prioritized Action Plan**: Ranked roadmap items labeled **High**, **Medium**, or **Low** with specific impact reasons.
 
 3. **Head-to-Head Competitor Comparison**:

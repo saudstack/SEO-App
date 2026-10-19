@@ -146,3 +146,44 @@ export interface CompetitorComparisonResult {
   };
   actionableInsights: string[];
 }
+
+export interface SentenceComplexityBucket {
+  category: string;
+  range: string;
+  count: number;
+  percentage: number;
+  benchmark: string;
+  color: string;
+  description: string;
+}
+
+export interface SyllableDistributionItem {
+  syllables: string;
+  label: string;
+  count: number;
+  percentage: number;
+  color: string;
+  exampleWords: string[];
+}
+
+export interface WordLengthItem {
+  lengthBucket: string;
+  count: number;
+  percentage: number;
+}
+
+export interface DetailedReadabilityMetrics {
+  totalSentences: number;
+  totalWords: number;
+  avgSentenceLength: number;
+  avgWordLength: number;
+  avgSyllablesPerWord: number;
+  fleschScore: number;
+  fleschLabel: 'Easy to read' | 'Standard' | 'Difficult';
+  complexWordCount: number;
+  complexWordPercentage: number;
+  sentenceComplexity: SentenceComplexityBucket[];
+  syllableDistribution: SyllableDistributionItem[];
+  wordLengthDistribution: WordLengthItem[];
+  flaggedLongSentences: { text: string; words: number }[];
+}
