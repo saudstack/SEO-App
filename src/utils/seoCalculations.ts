@@ -3,7 +3,15 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { BrowserMetrics, HeadingAnalysis, HeadingItem, AuditResult } from '../types/seo';
+import {
+  BrowserMetrics,
+  HeadingAnalysis,
+  HeadingItem,
+  AuditResult,
+  CompetitorData,
+  CompetitorMetricDiff,
+  CompetitorComparisonResult,
+} from '../types/seo';
 
 /**
  * Counts syllables in an English word using standard phonetic heuristics.
@@ -262,6 +270,49 @@ We have been serving customers for a while. Our clinical treatments utilize adva
 };
 
 /**
+ * Realistic ranking competitor for "dentist in doha" benchmark.
+ */
+export const SAMPLE_COMPETITOR_PAGE = {
+  url: 'https://almeezandental.qa/dentist-in-doha',
+  title: 'Top Rated Dentist in Doha, Qatar | Comprehensive Dental Care',
+  metaDescription:
+    'Looking for a compassionate, experienced dentist in Doha? We provide 24/7 emergency care, gentle teeth whitening, dental implants, and pediatric dentistry.',
+  targetKeyword: 'dentist in doha',
+  content: `# Best Dentist in Doha: Premium Dental Care & Family Treatments
+
+Welcome to our accredited dental center located in West Bay, Doha. Finding an experienced, certified dentist in Doha is essential for maintaining lifelong oral hygiene, confident smiles, and pain-free preventative wellness. Our clinic unites board-certified specialists, low-radiation digital 3D imaging, and gentle patient-focused treatment rooms.
+
+Whether you need routine tartar cleaning, urgent relief from a severe toothache, dental implants, or cosmetic smile restoration, our Doha team is dedicated to providing anxiety-free care for the entire family.
+
+## Comprehensive Dental Treatments in Doha
+
+We deliver a complete spectrum of preventative, cosmetic, and surgical dental services tailored for residents and visitors in Qatar:
+
+### 1. General & Preventative Dentistry
+Routine examinations and timely cleanings prevent gum disease and decay before expensive complications emerge:
+- Ultrasonic scaling, plaque debridement, and stain removal
+- Digital panoramic X-rays and low-dose intraoral imaging
+- Fluoride treatments and preventative tooth sealants for children
+- Natural tooth-colored composite restorations
+
+### 2. Cosmetic Dentistry & In-Office Whitening
+Transform your smile with fast, minimally invasive aesthetic procedures:
+- Advanced in-office laser teeth whitening (up to 7 shades brighter in 45 minutes)
+- Custom porcelain veneers and composite enamel bonding
+- Invisible clear aligners for adults and teenagers
+
+### 3. Emergency Dental Care & Urgent Consultations
+Sudden oral injuries and severe toothaches require immediate clinical intervention. We reserve daily slots for urgent consultations, cracked teeth, and emergency root canal therapy across Doha.
+
+## Why Patients Recommend Our Doha Dental Clinic
+- Multilingual dental surgeons fluent in Arabic, English, and French
+- Transparent price schedules with direct insurance billing across Qatar
+- Convenient evening appointments and complimentary valet parking
+
+Schedule your checkup with a leading dentist in Doha today and experience modern, patient-first dental excellence.`,
+};
+
+/**
  * Builds a clean Markdown report for exporting the audit.
  */
 export function generateMarkdownReport(
@@ -422,4 +473,374 @@ export function generateJsonReport(payload: {
   };
 
   return JSON.stringify(exportData, null, 2);
+}
+
+/**
+ * Builds a structured head-to-head metric comparison between the audited page and a competitor.
+ */
+export function buildCompetitorComparison(params: {
+  yourMetrics: BrowserMetrics;
+  yourTitle: string;
+  yourMeta: string;
+  yourUrl?: string;
+  competitor: CompetitorData;
+  targetKeyword: string;
+}): CompetitorComparisonResult {
+  const { yourMetrics, yourTitle, yourMeta, competitor, targetKeyword } = params;
+  const compMetrics = competitor.metrics;
+
+  const diffs: CompetitorMetricDiff[] = [];
+
+  // 1. Word Count & Content Depth
+  const wordDiff = yourMetrics.wordCount - compMetrics.wordCount;
+  let wordWinner: 'you' | 'competitor' | 'tie' = 'tie';
+  if (Math.abs(wordDiff) > 50) {
+    wordWinner = wordDiff > 0 ? 'you' : 'competitor';
+  }
+  diffs.push({
+    metric: 'Word Count & Content Depth',
+    category: 'content',
+    yourValue: `${yourMetrics.wordCount} words`,
+    competitorValue: `${compMetrics.wordCount} words`,
+    winner: wordWinner,
+    diffText:
+      wordDiff === 0
+        ? 'Exact match'
+        : `${wordDiff > 0 ? '+' : ''}${wordDiff} words (${Math.round(
+            (yourMetrics.wordCount / Math.max(1, compMetrics.wordCount)) * 100
+          )}% of competitor)`,
+    insight:
+      wordWinner === 'competitor'
+        ? `Competitor provides significantly deeper coverage (+${Math.abs(
+            wordDiff
+          )} words). Expanding content depth helps satisfy search intent.`
+        : wordWinner === 'you'
+        ? `Your page has superior content volume (+${wordDiff} words). Ensure every section retains high informational value.`
+        : 'Both pages have comparable content volume.',
+  });
+
+  // 2. Flesch Reading Ease
+  const fleschDiff = yourMetrics.fleschScore - compMetrics.fleschScore;
+  let fleschWinner: 'you' | 'competitor' | 'tie' = 'tie';
+  const yourDistance = Math.abs(yourMetrics.fleschScore - 65);
+  const compDistance = Math.abs(compMetrics.fleschScore - 65);
+  if (Math.abs(yourDistance - compDistance) > 5) {
+    fleschWinner = yourDistance < compDistance ? 'you' : 'competitor';
+  }
+  diffs.push({
+    metric: 'Readability (Flesch Score)',
+    category: 'readability',
+    yourValue: `${yourMetrics.fleschScore} / 100 (${yourMetrics.fleschLabel})`,
+    competitorValue: `${compMetrics.fleschScore} / 100 (${compMetrics.fleschLabel})`,
+    winner: fleschWinner,
+    diffText: `${fleschDiff > 0 ? '+' : ''}${fleschDiff} pts difference`,
+    insight:
+      yourMetrics.fleschScore < 55
+        ? 'Your content is denser and harder to read. Simplify vocabulary and shorten complex sentences.'
+        : compMetrics.fleschScore < 55
+        ? 'Your readability score is higher and clearer for everyday web readers than your competitor.'
+        : 'Both pages maintain accessible readability for mainstream audiences.',
+  });
+
+  // 3. Average Sentence Length
+  const sentDiff = Number((yourMetrics.avgSentenceLength - compMetrics.avgSentenceLength).toFixed(1));
+  let sentWinner: 'you' | 'competitor' | 'tie' = 'tie';
+  if (Math.abs(sentDiff) > 2) {
+    const yourSentDist = Math.abs(yourMetrics.avgSentenceLength - 16);
+    const compSentDist = Math.abs(compMetrics.avgSentenceLength - 16);
+    sentWinner = yourSentDist < compSentDist ? 'you' : 'competitor';
+  }
+  diffs.push({
+    metric: 'Average Sentence Length',
+    category: 'readability',
+    yourValue: `${yourMetrics.avgSentenceLength} words/sentence`,
+    competitorValue: `${compMetrics.avgSentenceLength} words/sentence`,
+    winner: sentWinner,
+    diffText: `${sentDiff > 0 ? '+' : ''}${sentDiff} words`,
+    insight:
+      yourMetrics.avgSentenceLength > 20
+        ? 'Your sentences run longer than standard web scannability guidelines (aim for 14-18 words per sentence).'
+        : 'Your sentence length fosters clear cadence and scannability.',
+  });
+
+  // 4. Target Keyword Frequency & Density
+  const densityDiff = Number((yourMetrics.keywordDensity - compMetrics.keywordDensity).toFixed(2));
+  let densityWinner: 'you' | 'competitor' | 'tie' = 'tie';
+  const yourDensityDist =
+    yourMetrics.keywordDensity < 1.0
+      ? 1.0 - yourMetrics.keywordDensity
+      : yourMetrics.keywordDensity > 2.5
+      ? yourMetrics.keywordDensity - 2.5
+      : 0;
+  const compDensityDist =
+    compMetrics.keywordDensity < 1.0
+      ? 1.0 - compMetrics.keywordDensity
+      : compMetrics.keywordDensity > 2.5
+      ? compMetrics.keywordDensity - 2.5
+      : 0;
+  if (Math.abs(yourDensityDist - compDensityDist) > 0.3) {
+    densityWinner = yourDensityDist < compDensityDist ? 'you' : 'competitor';
+  }
+  diffs.push({
+    metric: 'Target Keyword Density',
+    category: 'keywords',
+    yourValue: `${yourMetrics.keywordCount}x (${yourMetrics.keywordDensity}%)`,
+    competitorValue: `${compMetrics.keywordCount}x (${compMetrics.keywordDensity}%)`,
+    winner: densityWinner,
+    diffText: `${densityDiff > 0 ? '+' : ''}${densityDiff}% density`,
+    insight:
+      yourMetrics.keywordDensity < 0.8
+        ? `Under-optimized keyword usage (${yourMetrics.keywordCount}x vs competitor's ${compMetrics.keywordCount}x). Naturally incorporate '${targetKeyword}' into relevant subheadings and paragraphs.`
+        : yourMetrics.keywordDensity > 3.0
+        ? 'Potential keyword over-optimization detected. Ensure usage feels conversational rather than repetitive.'
+        : 'Your keyword density is well-balanced within the 1.0%–2.5% safe optimization band.',
+  });
+
+  // 5. Keyword in Title Tag
+  const titleHasKeyword = yourMetrics.inTitle;
+  const compTitleHasKeyword = compMetrics.inTitle;
+  const titleWinner =
+    titleHasKeyword === compTitleHasKeyword ? 'tie' : titleHasKeyword ? 'you' : 'competitor';
+  diffs.push({
+    metric: 'Target Keyword in Title Tag',
+    category: 'keywords',
+    yourValue: titleHasKeyword ? 'Yes' : 'Missing',
+    competitorValue: compTitleHasKeyword ? 'Yes' : 'Missing',
+    winner: titleWinner,
+    diffText:
+      titleWinner === 'tie'
+        ? 'Matched'
+        : titleWinner === 'you'
+        ? 'Your Advantage'
+        : 'Competitor Advantage',
+    insight:
+      !titleHasKeyword && compTitleHasKeyword
+        ? `Competitor has the keyword in their title. Title tags are among the strongest on-page ranking signals.`
+        : titleHasKeyword && !compTitleHasKeyword
+        ? `You have a direct keyword advantage in the title tag.`
+        : 'Both pages have equal keyword presence in the title tag.',
+  });
+
+  // 6. Keyword in First 100 Words
+  const f100Winner =
+    yourMetrics.inFirst100 === compMetrics.inFirst100
+      ? 'tie'
+      : yourMetrics.inFirst100
+      ? 'you'
+      : 'competitor';
+  diffs.push({
+    metric: 'Keyword in First 100 Words',
+    category: 'keywords',
+    yourValue: yourMetrics.inFirst100 ? 'Found early' : 'Missing',
+    competitorValue: compMetrics.inFirst100 ? 'Found early' : 'Missing',
+    winner: f100Winner,
+    diffText:
+      f100Winner === 'tie' ? 'Matched' : f100Winner === 'you' ? 'Your Advantage' : 'Competitor Advantage',
+    insight:
+      !yourMetrics.inFirst100 && compMetrics.inFirst100
+        ? 'Competitor establishes topical relevance in their introductory paragraph. Add the keyword in your first 100 words.'
+        : 'Topical relevance is established early in the opening copy.',
+  });
+
+  // 7. Keyword in Headings
+  const headWinner =
+    yourMetrics.inHeadings === compMetrics.inHeadings
+      ? 'tie'
+      : yourMetrics.inHeadings
+      ? 'you'
+      : 'competitor';
+  diffs.push({
+    metric: 'Keyword in Headings',
+    category: 'headings',
+    yourValue: yourMetrics.inHeadings ? 'Present' : 'Missing',
+    competitorValue: compMetrics.inHeadings ? 'Present' : 'Missing',
+    winner: headWinner,
+    diffText:
+      headWinner === 'tie' ? 'Matched' : headWinner === 'you' ? 'Your Advantage' : 'Competitor Advantage',
+    insight:
+      !yourMetrics.inHeadings && compMetrics.inHeadings
+        ? 'Competitor reinforces relevance by including keyword variations in headings.'
+        : 'Good heading keyword optimization.',
+  });
+
+  // 8. Heading Structure & Hierarchy
+  const yourH1Valid = yourMetrics.h1Count === 1;
+  const compH1Valid = compMetrics.h1Count === 1;
+  const h1Winner =
+    yourH1Valid === compH1Valid &&
+    yourMetrics.headingsLogicalOrder === compMetrics.headingsLogicalOrder
+      ? 'tie'
+      : yourH1Valid && yourMetrics.headingsLogicalOrder
+      ? 'you'
+      : 'competitor';
+  diffs.push({
+    metric: 'Heading Structure & Hierarchy',
+    category: 'headings',
+    yourValue: `${yourMetrics.h1Count} H1, ${yourMetrics.headingsList.length} total (${
+      yourMetrics.headingsLogicalOrder ? 'Clean' : 'Issues'
+    })`,
+    competitorValue: `${compMetrics.h1Count} H1, ${compMetrics.headingsList.length} total (${
+      compMetrics.headingsLogicalOrder ? 'Clean' : 'Issues'
+    })`,
+    winner: h1Winner,
+    diffText: `${yourMetrics.headingsList.length} vs ${compMetrics.headingsList.length} headings`,
+    insight:
+      !yourMetrics.headingsLogicalOrder
+        ? 'Your heading hierarchy skips levels. A clean H1 -> H2 -> H3 outline clarifies document architecture for crawlers.'
+        : 'Clean semantic heading hierarchy maintained.',
+  });
+
+  // 9. Meta Description Optimization
+  const yourMetaLen = (yourMeta || '').trim().length;
+  const compMetaLen = (competitor.metaDescription || '').trim().length;
+  const yourMetaValid = yourMetaLen >= 70 && yourMetaLen <= 160;
+  const compMetaValid = compMetaLen >= 70 && compMetaLen <= 160;
+  let metaWinner: 'you' | 'competitor' | 'tie' = 'tie';
+  if (yourMetaValid !== compMetaValid) {
+    metaWinner = yourMetaValid ? 'you' : 'competitor';
+  } else if (!yourMetaLen && compMetaLen) {
+    metaWinner = 'competitor';
+  }
+  diffs.push({
+    metric: 'Meta Description Optimization',
+    category: 'content',
+    yourValue: yourMetaLen > 0 ? `${yourMetaLen} chars` : 'Missing (0 chars)',
+    competitorValue: compMetaLen > 0 ? `${compMetaLen} chars` : 'Missing (0 chars)',
+    winner: metaWinner,
+    diffText: `${yourMetaLen} vs ${compMetaLen} chars`,
+    insight:
+      yourMetaLen === 0
+        ? 'Your page lacks a dedicated meta description tag, leading to auto-generated SERP snippets and lower CTR.'
+        : yourMetaLen > 160
+        ? 'Your meta description exceeds Google snippet cut-off (~160 chars).'
+        : 'Your meta description length is within recommended desktop & mobile limits.',
+  });
+
+  // Summary calculation
+  let yourWins = 0;
+  let competitorWins = 0;
+  let ties = 0;
+  for (const d of diffs) {
+    if (d.winner === 'you') yourWins++;
+    else if (d.winner === 'competitor') competitorWins++;
+    else ties++;
+  }
+
+  let verdict = '';
+  if (competitorWins > yourWins) {
+    verdict = `Competitor holds the advantage in ${competitorWins} of ${diffs.length} key areas. Focus on matching content depth and fixing on-page keyword placement.`;
+  } else if (yourWins > competitorWins) {
+    verdict = `Your page outperforms the competitor in ${yourWins} of ${diffs.length} key areas. Maintain this lead while refining any secondary gaps.`;
+  } else {
+    verdict = `Competitive parity: Tied in multiple areas. Differentiate by addressing thin sections and enhancing click appeal.`;
+  }
+
+  // Derive strategic actionable insights
+  const actionableInsights: string[] = [];
+  if (wordWinner === 'competitor') {
+    actionableInsights.push(
+      `Content Depth Gap: Competitor has ${compMetrics.wordCount} words vs your ${yourMetrics.wordCount} words. Expand your page by at least ${Math.abs(
+        wordDiff
+      )} words with detailed service explanations and FAQ sections.`
+    );
+  }
+  if (!titleHasKeyword && compTitleHasKeyword) {
+    actionableInsights.push(
+      `Title Tag Gap: Place '${targetKeyword}' prominently in your title tag near the beginning, followed by your brand or location.`
+    );
+  }
+  if (yourMetaLen === 0 && compMetaLen > 0) {
+    actionableInsights.push(
+      `Snippet CTR Gap: Add a compelling 140–155 character meta description containing '${targetKeyword}' and a clear call-to-action.`
+    );
+  }
+  if (!yourH1Valid || !yourMetrics.headingsLogicalOrder) {
+    actionableInsights.push(
+      `Heading Architecture Gap: Standardize to exactly 1 H1 containing the target keyword, followed by organized H2 and H3 subsections.`
+    );
+  }
+  if (!yourMetrics.inHeadings && compMetrics.inHeadings) {
+    actionableInsights.push(
+      `Subheading Optimization Gap: Include '${targetKeyword}' or related phrase entities in at least one H2 section.`
+    );
+  }
+  if (fleschWinner === 'competitor' && yourMetrics.fleschScore < 55) {
+    actionableInsights.push(
+      `Readability Gap: Your reading score (${yourMetrics.fleschScore}) is significantly lower than competitor's (${compMetrics.fleschScore}). Break long sentences and shorten syllables.`
+    );
+  }
+  if (actionableInsights.length === 0) {
+    actionableInsights.push(
+      `Topical Dominance: Your on-page heuristics lead or match the competitor across all major categories. Focus on search intent satisfaction, internal linking, and fresh reviews.`
+    );
+  }
+
+  return {
+    competitor,
+    metricsComparison: diffs,
+    summary: {
+      yourWins,
+      competitorWins,
+      ties,
+      verdict,
+    },
+    actionableInsights,
+  };
+}
+
+/**
+ * Builds a clean Markdown report comparing the audited page against the competitor.
+ */
+export function generateCompetitorMarkdownReport(
+  comparison: CompetitorComparisonResult,
+  targetKeyword: string,
+  yourTitle?: string,
+  yourUrl?: string
+): string {
+  const dateStr = new Date().toLocaleDateString('en-US', {
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+  });
+
+  return `# Page Auditor — Head-to-Head Competitor Comparison
+**Date:** ${dateStr}  
+**Target Keyword:** \`${targetKeyword}\`  
+**Your Page:** ${yourTitle || '(Audited Page)'} ${yourUrl ? `(${yourUrl})` : ''}  
+**Competitor:** ${comparison.competitor.title || '(Competitor Page)'} (${comparison.competitor.url})
+
+---
+
+## 1. Executive Scoreboard
+- **Your Wins:** ${comparison.summary.yourWins}
+- **Competitor Wins:** ${comparison.summary.competitorWins}
+- **Tied Metrics:** ${comparison.summary.ties}
+- **Verdict:** ${comparison.summary.verdict}
+
+---
+
+## 2. Metric-by-Metric Comparison Table
+| Metric | Your Page | Competitor | Winner / Advantage | Key Insight |
+| :--- | :--- | :--- | :--- | :--- |
+${comparison.metricsComparison
+  .map(
+    m =>
+      `| **${m.metric}** | ${m.yourValue} | ${m.competitorValue} | ${
+        m.winner === 'you'
+          ? '🏆 You'
+          : m.winner === 'competitor'
+          ? '⚡ Competitor'
+          : '🤝 Tie'
+      } (${m.diffText}) | ${m.insight} |`
+  )
+  .join('\n')}
+
+---
+
+## 3. Priority Takeaways to Outrank This Competitor
+${comparison.actionableInsights.map(item => `- ${item}`).join('\n')}
+
+---
+*Generated by Page Auditor Competitor Intelligence.*
+`;
 }

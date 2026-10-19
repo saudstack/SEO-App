@@ -24,7 +24,16 @@ Page Auditor evaluates any web page's content against a primary target keyword a
    - **Readability Improvements**: Identifies specific dense or passive sentences from the copy and provides clear, simplified rewrites.
    - **Prioritized Action Plan**: Ranked roadmap items labeled **High**, **Medium**, or **Low** with specific impact reasons.
 
-3. **Interactive SEO Checklist (Session-Persisted)**:
+3. **Head-to-Head Competitor Comparison**:
+   - **URL Fetch & Live Crawl**: Input any competing ranking URL to extract their live headings, title, meta description, and content for real-time benchmarking.
+   - **Sample Competitor Instant Load**: Test the benchmarking flow with one click using the pre-configured *Al Meezan Dental* competitor benchmark.
+   - **Side-by-Side Metric Contrast**: Contrasts word count, Flesch reading score, average sentence length, keyword density, on-page keyword placement (title, intro 100 words, headings), and heading hierarchy.
+   - **Visual Advantage & Win Badges**: Instant scoreboard highlights which page holds the edge across each category (You Lead, Competitor Lead, or Tied).
+   - **Snippet & Outline Comparison**: Compare your title/meta tags and heading outlines side-by-side with your competitor.
+   - **Actionable Outranking Takeaways**: Generates prioritized strategies to outrank the specific competitor based on identified gaps.
+   - **Export Comparison**: Copy the full head-to-head Markdown comparison table to clipboard.
+
+4. **Interactive SEO Checklist (Session-Persisted)**:
    - **Live Progress Tracking**: Interactive checkboxes to mark off tasks as fixes are made to your website, complete with progress percentage and milestone celebration banner.
    - **Session Persistence**: Checked states persist automatically in `sessionStorage` throughout your session, surviving page refreshes and tab switching.
    - **Custom Tasks**: Add custom webmaster action items (e.g. submit XML sitemap, update canonical tag, add internal links) with customizable priority badges.

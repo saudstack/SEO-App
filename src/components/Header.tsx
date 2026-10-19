@@ -65,6 +65,9 @@ export const Header: React.FC<HeaderProps> = ({
               <a href="#serp-preview" className="hover:text-slate-900 transition-colors">
                 SERP Preview
               </a>
+              <a href="#competitor-comparison" className="hover:text-slate-900 transition-colors">
+                Competitor
+              </a>
               <a href="#headings" className="hover:text-slate-900 transition-colors">
                 Headings
               </a>

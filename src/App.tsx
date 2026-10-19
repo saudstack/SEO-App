@@ -11,6 +11,7 @@ import { ScoreGauge } from './components/ScoreGauge';
 import { PreAuditDiagnostics } from './components/PreAuditDiagnostics';
 import { SuggestionsCard } from './components/SuggestionsCard';
 import { SerpPreviewCard } from './components/SerpPreviewCard';
+import { CompetitorComparisonCard } from './components/CompetitorComparisonCard';
 import { HeadingsCard } from './components/HeadingsCard';
 import { KeywordGapsCard } from './components/KeywordGapsCard';
 import { ReadabilityCard } from './components/ReadabilityCard';
@@ -582,6 +583,16 @@ export default function App() {
                 const idx = auditResult.meta_description_suggestions.indexOf(m);
                 if (idx !== -1) setSelectedMetaIndex(idx);
               }}
+            />
+
+            {/* Competitor Comparison Section */}
+            <CompetitorComparisonCard
+              yourMetrics={metrics}
+              yourTitle={title}
+              yourMeta={metaDescription}
+              yourUrl={pageUrl}
+              targetKeyword={targetKeyword}
+              onToast={showToast}
             />
 
             {/* Headings & Outline Recommendations */}

@@ -115,3 +115,34 @@ export interface AuditRequestPayload {
   /** Client-side pre-calculated heuristics and diagnostic metrics. */
   metrics?: BrowserMetrics;
 }
+
+export interface CompetitorData {
+  url: string;
+  title: string;
+  metaDescription: string;
+  content: string;
+  metrics: BrowserMetrics;
+  fetchedAt: string;
+}
+
+export interface CompetitorMetricDiff {
+  metric: string;
+  category: 'content' | 'readability' | 'keywords' | 'headings';
+  yourValue: string | number;
+  competitorValue: string | number;
+  winner: 'you' | 'competitor' | 'tie';
+  diffText: string;
+  insight: string;
+}
+
+export interface CompetitorComparisonResult {
+  competitor: CompetitorData;
+  metricsComparison: CompetitorMetricDiff[];
+  summary: {
+    yourWins: number;
+    competitorWins: number;
+    ties: number;
+    verdict: string;
+  };
+  actionableInsights: string[];
+}
